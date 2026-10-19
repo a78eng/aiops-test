@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  # PostgreSQL + pgvector
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: aiops-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: aiops
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: Admin@123456   # 生产请改强密码
+    ports:
+      - "5432:5432"
+    volumes:
+      - ../data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d aiops"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: aiops-prometheus
+    restart: always
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../data/prometheus:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+      - '--web.external-url=/prometheus/'
+      - '--web.route-prefix=/prometheus/'
+
+  # node_exporter（采集宿主机指标）
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: aiops-node-exporter
+    restart: always
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: aiops-grafana
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=Admin@123456
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - 'GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s:%(http_port)s/grafana/'
+      - 'GF_SERVER_SERVE_FROM_SUB_PATH=true'
+    volumes:
+      - ../data/grafana:/var/lib/grafana
+
+  # Loki
+  loki:
+    image: grafana/loki:3.1.0
+    container_name: aiops-loki
+    restart: always
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ../data/loki:/loki
+      - ./loki-config.yaml:/etc/loki/local-config.yaml:ro
+
+  # Promtail
+  promtail:
+    image: grafana/promtail:3.1.0
+    container_name: aiops-promtail
+    restart: always
+    volumes:
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./promtail-config.yaml:/etc/promtail/config.yml:ro
+    command: -config.file=/etc/promtail/config.yml
+
+networks:
+  default:
+    name: aiops-net
